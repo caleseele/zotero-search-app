@@ -103,6 +103,8 @@
 
       <div class="import-bar">
         <label style="font-size:13px"><input type="checkbox" id="selAll"> 全选</label>
+        <input id="token" placeholder="访问令牌（导入用，选填）" style="width:200px"
+               title="公开部署时填 HF/Render 里设置的 ACCESS_TOKEN；本地留空即可">
         <button id="importBtn" disabled>导入选中到 Zotero</button>
         <span id="importStatus" class="status"></span>
       </div>
@@ -224,12 +226,14 @@ async function doSearch(){
 async function doImport(){
   const idx=[...$('results').querySelectorAll('.cb:checked')].map(cb=>+cb.dataset.i);
   if(!idx.length) return;
-  const items = idx.map(i=>({source:LAST[i].source, rec:LAST[i]}));
+    const items = idx.map(i=>({source:LAST[i].source, rec:LAST[i]}));
+  const token = ($('token').value||'').trim();
+  try{ if(token) localStorage.setItem('zws_token', token); }catch(e){}
   $('importBtn').disabled=true;
   $('importStatus').innerHTML='<span class="spinner"></span> 导入中（含全文获取，请稍候）…';
   try{
     const resp = await fetch(api('/api/import'),{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({items})});
+      body: JSON.stringify(token?{items, token}:{items})});
     const d = await resp.json();
     let ok=0, err=0; const lines=[];
     (d.results||[]).forEach(r=>{
@@ -276,6 +280,7 @@ $('clearHist').addEventListener('click',()=>{ if(confirm('确认清空本地检�
 
 // 启动时清空服务端历史（仅清服务端缓存，前端不强制）；这里仅载入
 loadMeta(); loadHistory();
+try{ const t=localStorage.getItem('zws_token'); if(t) $('token').value=t; }catch(e){}
 </script>
 </body>
 </html>
