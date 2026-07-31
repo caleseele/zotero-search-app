@@ -12,33 +12,70 @@
 
 ---
 
-## 方案一：Hugging Face Spaces（最省事，免费 + 自带 HTTPS + 公开子域名）
+## 方案一（推荐）：Render —— 免费 + 自动 HTTPS + 公开子域名
 
-1. 注册/登录 https://huggingface.co （免费）。
-2. 右上角 **New Space** → 填写名称（如 `zotero-search`）→ **SDK 选 Docker** → 可见性 **Public** → Create。
-3. 进入 Space 后，左侧 **Settings → Variables and secrets**，添加：
-   - `ZOTERO_USER_ID` = 你的 Zotero 用户 ID
-   - `ZOTERO_API_KEY` = 你的 Zotero API Key
-   - `ACCESS_TOKEN` = 任取一个强口令（导入时用）
-4. 把本文件夹内容推上去（三种方式任选）：
-   - **网页上传**：Space 页面 Files 标签 → 拖入本文件夹全部文件
-   - **Git**：`git clone <Space 的 git 地址>` → 复制本文件夹文件 → `git add -A && git commit -m init && git push`
-   - **CLI**：`pip install -U huggingface_hub` → `huggingface-cli upload <你的用户名>/zotero-search ./`
-5. 等构建完成（约 1–2 分钟），访问 `https://<用户名>-zotero-search.hf.space/` 即可。
+> 为什么选它：对国内 IP 友好，不易像 HF 那样因代理 IP 被风控 403。
+> 前提：需要一个 **免费的 GitHub 账号**（Render 必须从 Git 仓库拉代码，不能拖文件上传）。
 
-> HF 免费版 Space 是公开子域名（`*.hf.space`），无自定义域名；如需自有域名需付费升级。
+### 第 0 步：把代码推到 GitHub（只需做一次）
+1. 注册 https://github.com （免费）。
+2. 新建一个**私有或公开**仓库，命名为 `zotero-search`（不要勾选自动生成 README）。
+3. 在本机 `cyyimprove_space` 文件夹里执行（把 `<你的GitHub用户名>` 替换掉）：
+   ```bash
+   cd C:\Users\希儿\Desktop\cyyimprove_space
+   git remote add origin https://github.com/<你的GitHub用户名>/zotero-search.git
+   git branch -M main
+   git push -u origin main
+   ```
+   > 推送时若提示登录，用 GitHub 用户名 + 一个 **Personal Access Token**（不是账户密码）。
+   > 注册/登录 GitHub 时建议**临时关闭代理**用真实 IP，避免也踩风控。
+
+### 第 1 步：在 Render 创建服务
+1. 注册/登录 https://render.com （免费）。
+2. 右上角 **New + → Web Service**。
+3. 选择 **Connect a repository** → 授权 GitHub → 选中刚建的 `zotero-search` 仓库。
+4. Render 检测到仓库里的 `render.yaml` 会自动套用配置：
+   - Runtime: Python 3.11
+   - Build: `pip install -r requirements.txt`
+   - Start: `python zotero_web_search.py`
+   - Plan: **Free**
+   - 实例区域：可保持默认（Oregon）或改 Singapore。
+   若没自动识别，手动填上面的 Build / Start 命令即可。
+5. 点 **Create Web Service**。
+
+### 第 2 步：设置环境变量（关键，Security）
+进入服务 **Environment** 标签，添加以下变量（建议全部勾选 "Secret"）：
+
+| 变量 | 值 | 说明 |
+|---|---|---|
+| `ZOTERO_USER_ID` | 你的 Zotero 用户 ID | zotero.org → Settings → API Keys 页顶部 |
+| `ZOTERO_API_KEY` | 你的 Zotero API Key | 同页 → Create new key |
+| `ACCESS_TOKEN` | 任取一段强随机串 | 导入接口令牌，别人无此串不能写你库 |
+
+> 注意：`render.yaml` 里这些变量标记为 `sync: false`，表示**由你在后台手动填**，
+> 不会从仓库读取——这正是为了安全（凭证不进代码）。
+
+### 第 3 步：等待部署
+保存后会自动构建（约 1–2 分钟）。完成后 Render 分配公开地址：
+`https://zotero-search.onrender.com/`
+
+把它发给别人即可访问。免费层在长时间无访问后会**休眠**，首次打开冷启动约 30–50 秒，稍等即可。
 
 ---
 
-## 方案二：Render（免费层，自动 HTTPS + 公开子域名）
+## 方案二：Hugging Face Spaces（免费 + 自带 HTTPS，但代理 IP 易被风控）
 
-1. 注册/登录 https://render.com （免费）。
-2. **New → Web Service** → 连接你的 GitHub 仓库（先把本文件夹推到 GitHub）。
-3. 配置：
-   - Runtime: Docker
-   - 端口：自动（Render 注入 `PORT`）
-   - 在 **Environment** 添加同上的三个变量
-4. 免费层会休眠（一段时间无访问后冷启动约 30–50 秒），首次打开稍等。
+> ⚠️ 实测：部分代理 IP 访问 huggingface.co/join 会被返回 403（反滥用风控）。
+> 若遇到，请**关闭代理用真实 IP** 注册，或改用上面的 Render。
+
+1. 注册/登录 https://huggingface.co （免费，真实 IP 访问）。
+2. 右上角 **New Space** → 名称 `zotero-search` → **SDK 选 Docker** → Public → Create。
+3. **Settings → Variables and secrets** 添加 `ZOTERO_USER_ID` / `ZOTERO_API_KEY` / `ACCESS_TOKEN`。
+4. 把本文件夹内容上传：
+   - 网页：Space 的 Files 标签拖入全部文件；或
+   - Git：`git clone <Space 的 git 地址>` 后复制文件再 push；或
+   - CLI：`pip install -U huggingface_hub && huggingface-cli upload <用户名>/zotero-search ./`
+5. 构建完成访问 `https://<用户名>-zotero-search.hf.space/`。
 
 ---
 
@@ -61,8 +98,7 @@ cloudflared tunnel --url http://127.0.0.1:8777
 
 - 打开网站 → 输入关键词 → 选数据源（PubMed 等）→ 检索 → 勾选 → 一键导入。
 - **检索任何人都能用**（只读，不消耗你的 Zotero 配额）。
-- **导入需要令牌**：在导入请求的 Header 带 `Authorization: Bearer <ACCESS_TOKEN>`，
-  或由你在前端/脚本里内置该令牌。未设置 `ACCESS_TOKEN` 时导入不校验（不建议公网这样）。
+- **导入需要令牌**：页面底部「访问令牌」框填入你设的 `ACCESS_TOKEN` 再点导入。
 
 ## 安全红线（务必遵守）
 

@@ -9,6 +9,9 @@ app_port: 7860
 
 # Zotero 文献检索（网页版）
 
+> 部署到 Render：见仓库根目录 `render.yaml`（已配置 Python 运行时 + Free 计划 + 环境变量占位）。
+> 部署到 Hugging Face Spaces：本 README 的 frontmatter 即 Space 元数据，直接拖入即可。
+
 类 PubMed 的文献检索框：支持 **PubMed / Crossref / Europe PMC / OpenAlex** 多数据源检索，
 结果可勾选后一键导入你的 Zotero 库（元数据 + 可获取的全文 PDF/PPT）。
 

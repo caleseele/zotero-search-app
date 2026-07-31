@@ -1,0 +1,26 @@
+# Render 一键部署蓝图
+# 在 Render 网页导入此仓库时会自动读取本文件。
+# 注意：凭证(ZOTERO_*)与访问令牌(ACCESS_TOKEN)请务必在 Render 后台
+# Settings -> Environment 里手动添加并勾选 "Secret"，切勿写进本文件！
+services:
+  - type: web
+    name: zotero-search
+    runtime: python
+    plan: free                       # 免费层，自带 *.onrender.com 域名 + HTTPS
+    region: oregon                   # 可选：singapore / frankfurt 等
+    buildCommand: pip install -r requirements.txt
+    startCommand: python zotero_web_search.py
+    healthCheckPath: /              # 应用根路径返回 HTML，用作健康检查
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: HOST
+        value: "0.0.0.0"            # 绑定公网
+      - key: PORT
+        sync: false                 # 由 Render 自动注入
+      - key: ZOTERO_USER_ID
+        sync: false                 # 在后台设为 Secret
+      - key: ZOTERO_API_KEY
+        sync: false                 # 在后台设为 Secret
+      - key: ACCESS_TOKEN
+        sync: false                 # 在后台设为 Secret（导入鉴权）
