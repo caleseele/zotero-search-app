@@ -1,0 +1,44 @@
+{
+  "_说明": "上游文献自动获取配置。keywords 支持 PubMed 检索语法（AND / OR / NOT / [Title] / [MeSH Terms] 等）。",
+
+  "keywords": [
+    "platelet cytoskeleton",
+    "actin cytoskeleton AND cancer metastasis",
+    "CRISPR base editing AND therapy"
+  ],
+
+  "search": {
+    "per_keyword_retmax": 30,
+    "recent_days": 1825,
+    "sort": "relevance",
+    "ncbi_api_key": ""
+  },
+
+  "filter": {
+    "daily_max_ingest": 10,
+    "min_impact_factor": 0.0,
+    "min_citations": 0,
+    "min_relevance": 0.15,
+    "min_total_score": 0.30,
+    "require_fulltext": false,
+    "exclude_no_abstract": true
+  },
+
+  "weights": {
+    "fulltext": 0.35,
+    "impact_factor": 0.25,
+    "citations": 0.20,
+    "relevance": 0.20,
+    "if_cap": 20.0,
+    "citation_cap": 500
+  },
+
+  "ingest": {
+    "enabled": true,
+    "collection_key": "",
+    "extra_tags": ["auto-upstream"],
+    "tag_with_keyword": true,
+    "per_keyword_collections": true,
+    "parent_collection_name": "上游检索"
+  }
+}

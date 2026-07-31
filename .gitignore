@@ -1,0 +1,8 @@
+# 凭证与本地状态，绝不提交
+zotero_config.json
+web_search_history.json
+*.pyc
+__pycache__/
+*.state.json
+.zaf_lock.pid
+.DS_Store

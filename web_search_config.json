@@ -1,0 +1,22 @@
+{
+  "port": 8777,
+  "sources": ["pubmed", "crossref", "europepmc", "openalex"],
+  "default_limit": 30,
+  "max_limit": 100,
+  "attach_pdf": true,
+  "openalex_mailto": "research@example.com",
+  "collection_name": "网页检索导入",
+  "proxy": "auto",
+  "proxy_candidates": [
+    "http://127.0.0.1:7897",
+    "http://127.0.0.1:7890",
+    "http://127.0.0.1:7898",
+    "http://127.0.0.1:10808",
+    "http://127.0.0.1:10809",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:8888",
+    "http://127.0.0.1:8118",
+    "http://127.0.0.1:33210"
+  ],
+  "use_proxy": true
+}

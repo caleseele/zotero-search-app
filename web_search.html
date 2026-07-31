@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zotero 文献检索</title>
+<style>
+  :root{
+    --primary:#0a6ebd; --primary-d:#095a9c; --bg:#f7f9fb; --card:#fff;
+    --border:#e2e8f0; --muted:#64748b; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+    --chip:#eef4fb;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:#1e293b;font-size:14px}
+  header{background:var(--primary);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px}
+  header h1{font-size:18px;margin:0;font-weight:600}
+  header .sub{font-size:12px;opacity:.85}
+  .wrap{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template-columns:1fr 280px;gap:18px}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .search-row{display:flex;gap:8px;flex-wrap:wrap}
+  input,select{font-size:14px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;outline:none;background:#fff}
+  input:focus,select:focus{border-color:var(--primary)}
+  #query{flex:1;min-width:220px}
+  button{cursor:pointer;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;background:var(--primary);color:#fff}
+  button:hover{background:var(--primary-d)}
+  button.ghost{background:var(--chip);color:var(--primary-d)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .adv{margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;display:none}
+  .adv.open{display:block}
+  .adv-grid{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  .toggle-adv{color:var(--primary);font-size:12px;cursor:pointer;user-select:none;margin-top:8px;display:inline-block}
+  .toolbar{display:flex;gap:8px;align-items:center;margin:14px 0 6px;flex-wrap:wrap}
+  .count{color:var(--muted);font-size:13px}
+  #results{display:flex;flex-direction:column;gap:10px}
+  .item{border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;gap:12px;background:#fff}
+  .item .cb{margin-top:3px}
+  .item .body{flex:1;min-width:0}
+  .item .ttl{font-size:15px;font-weight:600;color:var(--primary-d);line-height:1.4}
+  .item .meta{color:var(--muted);font-size:12.5px;margin:4px 0}
+  .item .abs{font-size:13px;color:#475569;line-height:1.5;margin-top:6px;max-height:84px;overflow:hidden;position:relative}
+  .item .abs.exp{flex:none;max-height:none}
+  .badges{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--primary-d)}
+  .badge.ft{background:#dcfce7;color:var(--ok)}
+  .badge.src{background:#f1f5f9;color:#475569}
+  .links a{color:var(--primary);text-decoration:none;font-size:12px;margin-right:10px}
+  .links a:hover{text-decoration:underline}
+  .side h3{font-size:13px;margin:0 0 8px;color:#334155}
+  .hist-item{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:#fff}
+  .hist-item:hover{background:var(--chip)}
+  .hist-item .q{font-weight:600;color:var(--primary-d);word-break:break-word}
+  .hist-item .m{font-size:11px;color:var(--muted);margin-top:3px}
+  .status{margin-top:12px;font-size:13px}
+  .status .ok{color:var(--ok)} .status .err{color:var(--err)} .status .warn{color:var(--warn)}
+  .import-bar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:center;margin-top:14px;border-radius:0 0 10px 10px}
+  .spinner{width:16px;height:16px;border:2px solid var(--primary);border-top-color:transparent;border-radius:50%;display:inline-block;vertical-align:-3px;animation:spin .7s linear infinite;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px}
+  .clear-btn{font-size:12px;color:var(--muted);cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔬 Zotero 文献检索</h1>
+  <span class="sub">本地 PubMed 风格检索框 · 勾选后一键导入 Zotero 库</span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <div class="search-row">
+        <input id="query" placeholder="输入关键词：标题 / 作者 / DOI / PMID，如 platelet cytoskeleton" />
+        <select id="source"></select>
+        <button id="searchBtn">检索</button>
+      </div>
+      <span class="toggle-adv" id="toggleAdv">▸ 高级筛选（年份 / 类型 / 语言）</span>
+      <div class="adv" id="adv">
+        <div class="adv-grid">
+          <div class="field">起始年份<input id="yearFrom" placeholder="2018" style="width:90px"></div>
+          <div class="field">结束年份<input id="yearTo" placeholder="2025" style="width:90px"></div>
+          <div class="field">文献类型
+            <select id="type">
+              <option value="">不限</option>
+              <option value="article">Article</option>
+              <option value="review">Review</option>
+            </select>
+          </div>
+          <div class="field">语言<input id="lang" placeholder="en / zh" style="width:80px"></div>
+          <div class="field">数量上限
+            <select id="limit"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <span class="count" id="count"></span>
+        <span class="clear-btn" id="clearHist" style="margin-left:auto">清空历史</span>
+      </div>
+      <div id="results"><div class="empty">输入关键词开始检索。</div></div>
+
+      <div class="import-bar">
+        <label style="font-size:13px"><input type="checkbox" id="selAll"> 全选</label>
+        <button id="importBtn" disabled>导入选中到 Zotero</button>
+        <span id="importStatus" class="status"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h3>📚 检索历史</h3>
+      <div id="history"><div class="empty">暂无历史</div></div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <h3>ℹ️ 数据源</h3>
+      <div id="srcInfo" style="font-size:12.5px;color:var(--muted);line-height:1.7"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let LAST = []; // 当前结果
+let HISTORY = [];
+
+// 自动检测 API 基地址：
+// - 通过 http://127.0.0.1:8777/ 访问 → 相对路径 /api/...
+// - 通过 file:// 直接打开 HTML  → 自动拼接 http://127.0.0.1:8777/api/...
+const API_BASE = (function(){
+  const p = location.protocol;
+  if (p === 'file:') return 'http://127.0.0.1:8777';
+  return '';
+})();
+
+function api(url){ return API_BASE + url; }
+
+function badge(text, cls){ return `<span class="badge ${cls||''}">${text}</span>`; }
+
+async function loadMeta(){
+  try{
+    const r = await fetch(api('/api/sources')); const d = await r.json();
+    const src = $('source'); src.innerHTML='';
+    d.sources.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.label;src.appendChild(o);});
+    const lim = $('limit'); lim.innerHTML='';
+    [20,30,50,100].forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;if(n==d.default_limit)o.selected=true;lim.appendChild(o);});
+    $('srcInfo').innerHTML =
+      `已启用：${d.sources.map(s=>s.label).join(' / ')}<br>`+
+      `Zotero API：${d.zotero_ready?'<span style="color:var(--ok)">已配置 ✓</span>':'<span style="color:var(--err)">未配置 ✗（导入会失败）</span>'}<br>`+
+      `PDF 全文自动获取：${d.attach_pdf?'开启':'关闭'}`;
+  }catch(e){ $('srcInfo').textContent='加载失败: '+e; }
+}
+
+function renderResults(){
+  const box = $('results');
+  if(!LAST.length){ box.innerHTML='<div class="empty">无匹配结果。</div>'; $('count').textContent=''; updateImportBtn(); return; }
+  box.innerHTML = LAST.map((r,i)=>{
+    const authors=(r.authors||[]).slice(0,6).join(', ')+( (r.authors||[]).length>6?' 等':'' );
+    const yr=r.year||'';
+    const jour=r.journal||'';
+    const abs=(r.abstract||'').slice(0,260);
+    const idlinks=[];
+    if(r.doi) idlinks.push(`<a href="https://doi.org/${r.doi}" target="_blank">DOI</a>`);
+    if(r.pmid) idlinks.push(`<a href="https://pubmed.ncbi.nlm.nih.gov/${r.pmid}/" target="_blank">PubMed</a>`);
+    if(r.pmcid) idlinks.push(`<a href="https://www.ncbi.nlm.nih.gov/pmc/articles/${r.pmcid}/" target="_blank">PMC</a>`);
+    return `<div class="item">
+      <input type="checkbox" class="cb" data-i="${i}">
+      <div class="body">
+        <div class="ttl">${esc(r.title||'(无标题)')}</div>
+        <div class="meta">${esc(authors)} · ${esc(jour)} ${yr?('· '+yr):''}</div>
+        <div class="abs" onclick="this.classList.toggle('exp')">${esc(abs)}${abs.length>=260?' …(点击展开)':''}</div>
+        <div class="badges">
+          ${badge(r.source.toUpperCase(),'src')}
+          ${r.has_fulltext?badge('全文可获取','ft'):''}
+          ${r.type?badge(r.type):''}
+          ${r.language?badge('lang: '+r.language):''}
+        </div>
+        <div class="links">${idlinks.join('')}</div>
+      </div>
+    </div>`;
+  }).join('');
+  $('count').textContent = `返回 ${LAST.length} 条（共命中 ${LAST._total||LAST.length}）`;
+  // 绑定勾选
+  box.querySelectorAll('.cb').forEach(cb=>cb.addEventListener('change',updateImportBtn));
+  $('selAll').checked=false;
+  updateImportBtn();
+}
+
+function updateImportBtn(){
+  const n = $('results').querySelectorAll('.cb:checked').length;
+  $('importBtn').disabled = n===0;
+  $('importBtn').textContent = n>0?`导入选中到 Zotero (${n})`:'导入选中到 Zotero';
+}
+
+function getFilters(){
+  return {
+    year_from: $('yearFrom').value.trim(),
+    year_to: $('yearTo').value.trim(),
+    type: $('type').value,
+    lang: $('lang').value.trim()
+  };
+}
+
+async function doSearch(){
+  const q = $('query').value.trim();
+  if(!q){ alert('请输入关键词'); return; }
+  $('searchBtn').disabled=true;
+  $('results').innerHTML='<div class="empty"><span class="spinner"></span> 正在检索…</div>';
+  try{
+    const resp = await fetch(api('/api/search'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({query:q, source:$('source').value, limit:+$('limit').value, filters:getFilters()})});
+    const d = await resp.json();
+    if(!resp.ok){ $('results').innerHTML=`<div class="empty" style="color:var(--err)">检索失败：${esc(d.error||'未知错误')}</div>`; return; }
+    LAST = d.results||[]; LAST._total = d.total;
+    renderResults();
+    loadHistory();
+  }catch(e){
+    $('results').innerHTML=`<div class="empty" style="color:var(--err)">请求异常：${esc(e)}</div>`;
+  }finally{ $('searchBtn').disabled=false; }
+}
+
+async function doImport(){
+  const idx=[...$('results').querySelectorAll('.cb:checked')].map(cb=>+cb.dataset.i);
+  if(!idx.length) return;
+  const items = idx.map(i=>({source:LAST[i].source, rec:LAST[i]}));
+  $('importBtn').disabled=true;
+  $('importStatus').innerHTML='<span class="spinner"></span> 导入中（含全文获取，请稍候）…';
+  try{
+    const resp = await fetch(api('/api/import'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({items})});
+    const d = await resp.json();
+    let ok=0, err=0; const lines=[];
+    (d.results||[]).forEach(r=>{
+      if(r.status==='ok'){ ok++; lines.push(`<div class="ok">✓ ${esc(r.title.slice(0,60))} → key=${r.key||''}${r.attached?' · 附件: '+esc(r.attached):''}</div>`); }
+      else { err++; lines.push(`<div class="err">✗ ${esc((r.title||'').slice(0,60))}: ${esc(r.msg||'')}</div>`); }
+    });
+    $('importStatus').innerHTML = `<div class="ok">成功 ${ok} 篇${err?` · 失败 ${err} 篇`:''}</div>`+lines.join('');
+  }catch(e){
+    $('importStatus').innerHTML=`<div class="err">导入异常：${esc(e)}</div>`;
+  }finally{ $('importBtn').disabled=false; }
+}
+
+async function loadHistory(){
+  try{
+    const r=await fetch(api('/api/history')); HISTORY=await r.json(); renderHistory();
+  }catch(e){}
+}
+function renderHistory(){
+  const box=$('history');
+  if(!HISTORY.length){ box.innerHTML='<div class="empty">暂无历史</div>'; return; }
+  box.innerHTML=HISTORY.map((h,i)=>`<div class="hist-item" data-i="${i}">
+    <div class="q">${esc(h.query)}</div>
+    <div class="m">${h.time} · ${labelOf(h.source)} · ${h.count} 条${h.total?(' / 命中 '+h.total):''}</div>
+  </div>`).join('');
+  box.querySelectorAll('.hist-item').forEach(el=>el.addEventListener('click',()=>{
+    const h=HISTORY[+el.dataset.i];
+    $('query').value=h.query;
+    [...$('source').options].forEach(o=>{if(o.value===h.source)o.selected=true;});
+    const f=h.filters||{};
+    $('yearFrom').value=f.year_from||''; $('yearTo').value=f.year_to||'';
+    $('type').value=f.type||''; $('lang').value=f.lang||'';
+    doSearch();
+  }));
+}
+function labelOf(s){ const m={'pubmed':'PubMed','crossref':'Crossref','europepmc':'Europe PMC','openalex':'OpenAlex'}; return m[s]||s; }
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+$('searchBtn').addEventListener('click',doSearch);
+$('query').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+$('toggleAdv').addEventListener('click',()=>{const a=$('adv');a.classList.toggle('open');$('toggleAdv').textContent=a.classList.contains('open')?'▾ 高级筛选（年份 / 类型 / 语言）':'▸ 高级筛选（年份 / 类型 / 语言）';});
+$('selAll').addEventListener('change',e=>{$('results').querySelectorAll('.cb').forEach(cb=>cb.checked=e.target.checked);updateImportBtn();});
+$('importBtn').addEventListener('click',doImport);
+$('clearHist').addEventListener('click',()=>{ if(confirm('确认清空本地检索历史？')){ HISTORY=[]; fetch('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{}); renderHistory(); } });
+
+// 启动时清空服务端历史（仅清服务端缓存，前端不强制）；这里仅载入
+loadMeta(); loadHistory();
+</script>
+</body>
+</html>
