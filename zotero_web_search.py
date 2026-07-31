@@ -647,7 +647,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    port = int(os.environ.get("PORT", CFG.get("port", DEFAULT_PORT)))
+    env_port = os.environ.get("PORT")
+    if env_port:
+        port = int(env_port)
+    else:
+        # 云端（HF Spaces / Render）默认 7860；本地保持 8777
+        port = 7860 if _is_cloud() else int(CFG.get("port", DEFAULT_PORT))
     host = os.environ.get("HOST")
     if not host:
         # 云环境（HF Spaces 等）自动绑定 0.0.0.0；本地默认 127.0.0.1
