@@ -1256,6 +1256,7 @@ def build_pdf(blocks, path):
         out += f"{offsets[i]:010d} 00000 n \n".encode("latin-1")
     out += (f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\n"
             f"startxref\n{xref}\n%%EOF\n").encode("latin-1")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as f:
         f.write(out)
     return path
