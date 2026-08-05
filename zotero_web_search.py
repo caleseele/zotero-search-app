@@ -77,13 +77,38 @@ def _is_cloud():
 
 
 def _auth_ok(headers, payload):
-    """若设置了 ACCESS_TOKEN，则 /api/import 必须携带正确令牌。"""
+    """鉴权：用户自带 Zotero 凭证（多用户模式）→ 放行；
+    否则若设了 ACCESS_TOKEN → 必须携带正确令牌（管理员模式）。"""
+    zid = (payload.get("zotero_user_id") or "").strip()
+    zkey = (payload.get("zotero_api_key") or "").strip()
+    if zid and zkey:
+        return True
     if not ACCESS_TOKEN:
         return True
     h = headers.get("Authorization", "")
     if h.startswith("Bearer "):
         return h[len("Bearer "):].strip() == ACCESS_TOKEN
     return (payload.get("token") or "").strip() == ACCESS_TOKEN
+
+
+# 多用户导入锁：同一时刻只允许一个导入（避免 zff.USER_ID/API_KEY 并发覆盖）
+_import_lock = threading.Lock()
+
+
+def test_zotero_connection(user_id, api_key):
+    """测试 Zotero 凭证是否有效。返回 (ok, detail)。"""
+    try:
+        req = urllib.request.Request(
+            f"{zff.WEB_API}/users/{user_id}/items/top?limit=1",
+            headers={"Zotero-API-Key": api_key, "Zotero-API-Version": "3"})
+        with _HTTP_OPENER.open(req, timeout=15) as r:
+            if r.status == 200:
+                return True, "连接成功"
+            return False, f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}: {e.read().decode('utf-8','replace')[:120]}"
+    except Exception as e:
+        return False, f"{e.__class__.__name__}: {str(e)[:120]}"
 
 
 # ---------------------------------------------------------------- 网络小工具
@@ -480,8 +505,25 @@ def _att_filename(fetch):
     return os.path.basename(fetch.get("path", "")) or "attachment.pdf"
 
 
-def import_items(items):
-    """批量导入选中文献到 Zotero。items: [{source, rec}]。"""
+def import_items(items, zotero_user_id=None, zotero_api_key=None):
+    """批量导入选中文献到 Zotero。items: [{source, rec}]。
+    多用户模式：zotero_user_id/zotero_api_key 由前端传入，临时覆盖 zff 模块变量。
+    加锁防并发：同一时刻只跑一个导入（凭证是模块级变量）。"""
+    with _import_lock:
+        # 备份并覆盖 zff 凭证
+        orig_uid, orig_key = zff.USER_ID, zff.API_KEY
+        if zotero_user_id and zotero_api_key:
+            zff.USER_ID = zotero_user_id.strip()
+            zff.API_KEY = zotero_api_key.strip()
+        try:
+            return _import_items_inner(items)
+        finally:
+            zff.USER_ID = orig_uid
+            zff.API_KEY = orig_key
+
+
+def _import_items_inner(items):
+    """import_items 的实际逻辑（凭证已设好）。"""
     cfg = zuf.load_config()
     cfg["ingest"]["tag_with_keyword"] = False
     coll_key = None
@@ -626,7 +668,8 @@ class Handler(BaseHTTPRequestHandler):
                              for s in CFG["sources"]],
                  "default_limit": CFG["default_limit"],
                  "attach_pdf": CFG["attach_pdf"],
-                 "zotero_ready": bool(zff.USER_ID and zff.USER_ID != "0" and zff.API_KEY)}))
+                 "zotero_ready": bool(zff.USER_ID and zff.USER_ID != "0" and zff.API_KEY),
+                 "multi_user": True}))
             return
         if self.path == "/api/history":
             self._send(200, json.dumps(load_history(), ensure_ascii=False))
@@ -691,14 +734,32 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/import":
             if not _auth_ok(self.headers, payload):
                 self._send(401, json.dumps(
-                    {"error": "需要访问令牌（Authorization: Bearer <token>）"}))
+                    {"error": "需要 Zotero 凭证或访问令牌"}))
                 return
             items = payload.get("items", [])
             if not items:
                 self._send(400, json.dumps({"error": "没有选中任何文献"}))
                 return
-            results = import_items(items)
+            zotero_user_id = (payload.get("zotero_user_id") or "").strip()
+            zotero_api_key = (payload.get("zotero_api_key") or "").strip()
+            # 多用户模式：必须提供凭证（除非服务端配了 env 变量）
+            if not zotero_user_id and not (zff.USER_ID and zff.USER_ID != "0"):
+                self._send(400, json.dumps(
+                    {"error": "请在下方填写 Zotero User ID 和 API Key"}))
+                return
+            results = import_items(items, zotero_user_id=zotero_user_id,
+                                   zotero_api_key=zotero_api_key)
             self._send(200, json.dumps({"results": results}, ensure_ascii=False))
+            return
+
+        if self.path == "/api/zotero-test":
+            zid = (payload.get("zotero_user_id") or "").strip()
+            zkey = (payload.get("zotero_api_key") or "").strip()
+            if not zid or not zkey:
+                self._send(400, json.dumps({"ok": False, "msg": "请填写 User ID 和 API Key"}))
+                return
+            ok, detail = test_zotero_connection(zid, zkey)
+            self._send(200, json.dumps({"ok": ok, "msg": detail}, ensure_ascii=False))
             return
 
         if self.path == "/api/translate":
@@ -739,7 +800,8 @@ def main():
     print(f"  数据源: {', '.join(CFG['sources'])}")
     print(f"  Zotero API: {'已配置' if (zff.USER_ID and zff.USER_ID!='0' and zff.API_KEY) else '未配置（导入将失败，请检查 zotero_config.json）'}")
     print(f"  代理: {_CURRENT_PROXY or '直连（无代理 / 自动探测未命中）'}")
-    print(f"  导入鉴权: {'已启用（需 ACCESS_TOKEN）' if ACCESS_TOKEN else '未启用'}")
+    print(f"  导入鉴权: 多用户模式（用户自带 Zotero 凭证）" +
+          (f" + 管理员令牌已设" if ACCESS_TOKEN else ""))
     print("  按 Ctrl+C 停止。")
     try:
         server.serve_forever()

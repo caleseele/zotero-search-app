@@ -63,6 +63,13 @@
   .status{margin-top:12px;font-size:13px}
   .status .ok{color:var(--ok)} .status .err{color:var(--err)} .status .warn{color:var(--warn)}
   .import-bar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--border);padding:12px 16px;display:flex;gap:10px;align-items:center;margin-top:14px;border-radius:0 0 10px 10px}
+  .zotero-cfg{margin-top:10px;padding:10px 14px;background:#f8fafc;border:1px solid var(--border);border-radius:8px}
+  .zotero-cfg summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--primary-d);user-select:none}
+  .zotero-cfg summary:hover{color:var(--primary)}
+  .cfg-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+  .cfg-row input{flex:1;min-width:140px}
+  .cfg-hint{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.5}
+  .cfg-hint a{color:var(--primary)}
   .spinner{width:16px;height:16px;border:2px solid var(--primary);border-top-color:transparent;border-radius:50%;display:inline-block;vertical-align:-3px;animation:spin .7s linear infinite;margin-right:6px}
   @keyframes spin{to{transform:rotate(360deg)}}
   .empty{color:var(--muted);text-align:center;padding:30px 0;font-size:13px}
@@ -72,7 +79,7 @@
 <body>
 <header>
   <h1>🔬 Zotero 文献检索</h1>
-  <span class="sub">本地 PubMed 风格检索框 · 勾选后一键导入 Zotero 库</span>
+  <span class="sub">PubMed 风格检索 · 勾选后导入你自己的 Zotero 库</span>
 </header>
 
 <div class="wrap">
@@ -108,10 +115,25 @@
       </div>
       <div id="results"><div class="empty">输入关键词开始检索。</div></div>
 
+      <div class="zotero-cfg">
+        <details id="zoteroCfgDetails">
+          <summary>⚙️ Zotero 账号设置（导入需要）</summary>
+          <div class="cfg-row">
+            <input id="zoteroUid" placeholder="Zotero User ID（纯数字，如 21150208）">
+            <input id="zoteroKey" type="password" placeholder="Zotero API Key">
+            <button class="ghost" id="testZoteroBtn">测试连接</button>
+          </div>
+          <div class="cfg-hint">
+            User ID 在 <a href="https://www.zotero.org/settings/storage" target="_blank">zotero.org/settings/storage</a> 查看；
+            API Key 在 <a href="https://www.zotero.org/settings/keys" target="_blank">zotero.org/settings/keys</a> 创建（需勾选 library write 权限）。
+            凭证仅存在本地浏览器，不记录到服务端。
+          </div>
+          <div id="zoteroTestResult" class="status" style="margin-top:6px"></div>
+        </details>
+      </div>
+
       <div class="import-bar">
         <label style="font-size:13px"><input type="checkbox" id="selAll"> 全选</label>
-        <input id="token" placeholder="访问令牌（导入用，选填）" style="width:200px"
-               title="公开部署时填 HF/Render 里设置的 ACCESS_TOKEN；本地留空即可">
         <button id="importBtn" disabled>导入选中到 Zotero</button>
         <span id="importStatus" class="status"></span>
       </div>
@@ -157,8 +179,8 @@ async function loadMeta(){
     [20,30,50,100].forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;if(n==d.default_limit)o.selected=true;lim.appendChild(o);});
     $('srcInfo').innerHTML =
       `已启用：${d.sources.map(s=>s.label).join(' / ')}<br>`+
-      `Zotero API：${d.zotero_ready?'<span style="color:var(--ok)">已配置 ✓</span>':'<span style="color:var(--err)">未配置 ✗（导入会失败）</span>'}<br>`+
-      `PDF 全文自动获取：${d.attach_pdf?'开启':'关闭'}`;
+      `PDF 全文自动获取：${d.attach_pdf?'开启':'关闭'}<br>`+
+      `导入方式：多用户模式（填写自己的 Zotero ID + API Key）`;
   }catch(e){ $('srcInfo').textContent='加载失败: '+e; }
 }
 
@@ -283,9 +305,16 @@ async function doSearch(){
 async function doImport(){
   const idx=[...$('results').querySelectorAll('.cb:checked')].map(cb=>+cb.dataset.i);
   if(!idx.length) return;
-    const items = idx.map(i=>({source:LAST[i].source, rec:LAST[i]}));
-  const token = ($('token').value||'').trim();
-  try{ if(token) localStorage.setItem('zws_token', token); }catch(e){}
+  const items = idx.map(i=>({source:LAST[i].source, rec:LAST[i]}));
+  const zid = ($('zoteroUid').value||'').trim();
+  const zkey = ($('zoteroKey').value||'').trim();
+  if(!zid || !zkey){
+    $('importStatus').innerHTML='<div class="err">请先在下方填写 Zotero User ID 和 API Key</div>';
+    $('zoteroCfgDetails').open=true;
+    return;
+  }
+  try{ localStorage.setItem('zws_uid', zid); localStorage.setItem('zws_key', zkey); }catch(e){}
+  const body = {items, zotero_user_id:zid, zotero_api_key:zkey};
   $('importBtn').disabled=true;
   $('importStatus').innerHTML='<span class="spinner"></span> 导入中（含全文获取+上传PDF，可能需要 1-3 分钟）…';
   // 30秒后更新提示，让用户知道还在跑
@@ -297,7 +326,7 @@ async function doImport(){
   const timeoutId=setTimeout(()=>controller.abort(),300000);
   try{
     const resp = await fetch(api('/api/import'),{method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(token?{items, token}:{items}),signal:controller.signal});
+      body: JSON.stringify(body),signal:controller.signal});
     clearTimeout(timeoutId); clearTimeout(slowTimer);
     const d = await resp.json();
     // 后端鉴权/参数错误时返回 4xx + {error: ...}，前端必须显示出来
@@ -305,7 +334,7 @@ async function doImport(){
       const reason = d.error || ('HTTP '+resp.status);
       $('importStatus').innerHTML =
         `<div class="err">导入失败：${esc(reason)}</div>` +
-        (resp.status===401 ? `<div class="err" style="font-weight:normal;margin-top:4px">提示：在下方"访问令牌"输入框填入 Render 后台 ACCESS_TOKEN 环境变量的值，再重试。</div>` : '');
+        (resp.status===401 ? `<div class="err" style="font-weight:normal;margin-top:4px">提示：请检查 Zotero User ID 和 API Key 是否正确。</div>` : '');
       return;
     }
     let ok=0, err=0; const lines=[];
@@ -356,9 +385,31 @@ $('selAll').addEventListener('change',e=>{$('results').querySelectorAll('.cb').f
 $('importBtn').addEventListener('click',doImport);
 $('clearHist').addEventListener('click',()=>{ if(confirm('确认清空本地检索历史？')){ HISTORY=[]; fetch('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{}); renderHistory(); } });
 
+// 测试 Zotero 连接
+$('testZoteroBtn').addEventListener('click', async()=>{
+  const zid=($('zoteroUid').value||'').trim();
+  const zkey=($('zoteroKey').value||'').trim();
+  if(!zid||!zkey){ $('zoteroTestResult').innerHTML='<div class="err">请填写 User ID 和 API Key</div>'; return; }
+  try{ localStorage.setItem('zws_uid',zid); localStorage.setItem('zws_key',zkey); }catch(e){}
+  $('testZoteroBtn').disabled=true;
+  $('zoteroTestResult').innerHTML='<span class="spinner"></span> 测试中…';
+  try{
+    const r=await fetch(api('/api/zotero-test'),{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({zotero_user_id:zid, zotero_api_key:zkey})});
+    const d=await r.json();
+    if(d.ok){
+      $('zoteroTestResult').innerHTML=`<div class="ok">✓ ${esc(d.msg||'连接成功')}（Zotero 库可访问）</div>`;
+    }else{
+      $('zoteroTestResult').innerHTML=`<div class="err">✗ ${esc(d.msg||'连接失败')}（请检查 User ID / API Key）</div>`;
+    }
+  }catch(e){
+    $('zoteroTestResult').innerHTML=`<div class="err">请求异常：${esc(e)}</div>`;
+  }finally{ $('testZoteroBtn').disabled=false; }
+});
+
 // 启动时清空服务端历史（仅清服务端缓存，前端不强制）；这里仅载入
 loadMeta(); loadHistory();
-try{ const t=localStorage.getItem('zws_token'); if(t) $('token').value=t; }catch(e){}
+try{ const u=localStorage.getItem('zws_uid'); const k=localStorage.getItem('zws_key'); if(u)$('zoteroUid').value=u; if(k)$('zoteroKey').value=k; }catch(e){}
 </script>
 </body>
 </html>
