@@ -47,6 +47,12 @@ SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
 SSL_CTX.verify_mode = ssl.CERT_NONE
 
+# 本地请求（Zotero 连接器 127.0.0.1:23119）必须绕过系统代理，
+# 否则 Clash 等代理会拦截 localhost 请求导致误判 Zotero 未运行。
+# 注意：必须在 _PROXY_OPENER 引用之前定义，否则无代理环境变量时
+# 模块加载会 NameError（云端环境即触发）。
+_NOPROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 # 外部学术源与 api.zotero.org 走直连更稳；但 Zotero 文件上传要到 S3 存储域（墙外），必须走代理。
 # 这里保存代理地址后清掉环境变量：http_get/API 请求直连，唯独 S3 上传用代理。
 ZOTERO_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
@@ -105,7 +111,7 @@ def log(*a):
 
 # 本地请求（Zotero 连接器 127.0.0.1:23119）必须绕过系统代理，
 # 否则 Clash 等代理会拦截 localhost 请求导致误判 Zotero 未运行。
-_NOPROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+# _NOPROXY_OPENER 已在前文与 _PROXY_OPENER 一起定义，此处不再重复。
 
 
 def _is_local(url):

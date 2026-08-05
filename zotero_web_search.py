@@ -519,7 +519,10 @@ def import_items(items):
         if CFG.get("attach_pdf"):
             meta = {"title": rec.get("title"), "doi": rec.get("doi"),
                     "pmid": rec.get("pmid"), "pmcid": rec.get("pmcid"),
-                    "journal": rec.get("journal")}
+                    "journal": rec.get("journal"),
+                    "abstract": rec.get("abstract") or "",
+                    "authors": rec.get("authors") or [],
+                    "year": rec.get("year") or ""}
             try:
                 fetch = zff.fetch_fulltext(meta)
                 if fetch.get("ok") and fetch.get("path"):
@@ -547,6 +550,39 @@ def load_history():
         return []
 
 
+# ---------------------------------------------------------------- 翻译（MyMemory 免费接口，无 API key）
+# 与检索/导入解耦的独立通道：前端 POST /api/translate {text, target} 拿到中文。
+# 云端 Render 直连 MyMemory；本地若代理可用则自动走代理。
+_MYMEMORY_URL = "https://api.mymemory.translated.net/get"
+_TRANSLATE_MAX_CHARS = 500   # MyMemory 匿名 IP 每日 5000 字配额，单次截断保护
+_TRANSLATE_TIMEOUT = 20      # 秒
+
+
+def _translate_text(text, target="zh-CN"):
+    """调用 MyMemory 翻译单段文本。返回 (translated_text, error_or_None)。"""
+    if not text or not text.strip():
+        return ("", "empty_text")
+    txt = text.strip()
+    if len(txt) > _TRANSLATE_MAX_CHARS:
+        txt = txt[:_TRANSLATE_MAX_CHARS]
+    params = urllib.parse.urlencode({"q": txt, "langpair": f"en|{target}"})
+    url = f"{_MYMEMORY_URL}?{params}"
+    # 直接用 urllib：云端走直连（_is_cloud() 已返回 False 会让代理逻辑跳过自动探测），
+    # 本地有代理时 _http_json 走代理；这里用普通 urlopen 不绕弯。
+    req = urllib.request.Request(url, headers={"User-Agent": "ZoteroWebSearch/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=_TRANSLATE_TIMEOUT) as r:
+            body = r.read().decode("utf-8", "replace")
+        data = json.loads(body)
+        if str(data.get("responseStatus")) == "200":
+            translated = (data.get("responseData") or {}).get("translatedText", "")
+            return (translated or "", None)
+        # MyMemory 用 403/429 表示限流；返回 details 便于前端提示
+        return ("", f"api_status={data.get('responseStatus')}: {data.get('responseDetails')}")
+    except Exception as e:
+        return ("", f"network_error: {e.__class__.__name__}: {str(e)[:120]}")
+
+
 def save_history_entry(entry):
     h = load_history()
     h.insert(0, entry)
@@ -565,11 +601,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 客户端已断开（导入耗时长，浏览器超时），忽略写错误
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
@@ -591,6 +630,25 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/history":
             self._send(200, json.dumps(load_history(), ensure_ascii=False))
+            return
+        # GET /api/translate?text=...&target=zh-CN —— 便捷的翻译查询（避免前端构造 POST body）
+        if self.path.startswith("/api/translate"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            text = (qs.get("text", [""])[0] or "").strip()
+            target = (qs.get("target", ["zh-CN"])[0] or "zh-CN").strip()
+            if not text:
+                self._send(400, json.dumps({"error": "text 不能为空"}))
+                return
+            translated, err = _translate_text(text, target=target)
+            if err:
+                self._send(200, json.dumps(
+                    {"translated": "", "error": err, "target": target},
+                    ensure_ascii=False))
+                return
+            self._send(200, json.dumps(
+                {"translated": translated, "error": None, "target": target},
+                ensure_ascii=False))
             return
         self._send(404, json.dumps({"error": "not found"}))
 
@@ -641,6 +699,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             results = import_items(items)
             self._send(200, json.dumps({"results": results}, ensure_ascii=False))
+            return
+
+        if self.path == "/api/translate":
+            # 翻译通道（独立于检索/导入，不需要 ACCESS_TOKEN；纯 GET 也支持便于直接调用）
+            text = (payload.get("text") or "").strip()
+            target = (payload.get("target") or "zh-CN").strip() or "zh-CN"
+            if not text:
+                self._send(400, json.dumps({"error": "text 不能为空"}))
+                return
+            translated, err = _translate_text(text, target=target)
+            if err:
+                # 翻译失败不视为致命错误，前端可显示"翻译暂不可用"
+                self._send(200, json.dumps(
+                    {"translated": "", "error": err, "target": target},
+                    ensure_ascii=False))
+                return
+            self._send(200, json.dumps(
+                {"translated": translated, "error": None, "target": target},
+                ensure_ascii=False))
             return
 
         self._send(404, json.dumps({"error": "not found"}))
