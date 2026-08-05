@@ -352,14 +352,10 @@ def fetch_fulltext(meta):
     if ab.get("ok"):
         return ab
 
-    # ---- (9) PPT 结构化摘要幻灯片：最终兜底 —— 即使 PDF 摘要也生成一份 PPT，
-    #       方便用户直接在 Zotero 中打开阅读或用于组会/汇报 ----
-    ppt = make_ppt_summary(meta)
-    if ppt.get("ok"):
-        return ppt
-
+    # PPT 回退已移除（用户要求：只用 PDF，不要 PPT）
+    # 若 PDF 摘要也生成失败，则直接返回失败
     return {"ok": False, "kind": "none", "path": None, "size": 0,
-            "note": f"已穷尽所有候选源均未获得全文，且摘要/PPT 生成均失败"}
+            "note": f"已穷尽所有候选源均未获得全文，且摘要 PDF 生成失败"}
 
 
 def make_structured_summary(meta):
