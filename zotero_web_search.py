@@ -20,7 +20,7 @@ Zotero 网页文献检索工具 —— 本地 PubMed 风格检索框
   python zotero_web_search.py
   浏览器打开 http://127.0.0.1:8777/
 """
-import sys, os, json, time, datetime, re, threading
+import sys, os, json, time, datetime, re, threading, hashlib
 import urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -70,10 +70,75 @@ CFG = load_config()
 # 本地未设置时视为关闭鉴权（不影响现有用法）。
 ACCESS_TOKEN = (os.environ.get("ACCESS_TOKEN") or "").strip()
 
+# 站点访问密码：云端部署时设 SITE_PASSWORD 环境变量，
+# 则所有页面和 API 都需要先输入密码才能访问。
+SITE_PASSWORD = (os.environ.get("SITE_PASSWORD") or "").strip()
+
 
 def _is_cloud():
     """检测是否在云托管环境（HF Spaces / Render 等）运行。"""
     return bool(os.environ.get("SPACE_ID") or os.environ.get("RENDER"))
+
+
+# ---------------------------------------------------------------- 站点访问密码
+def _site_auth_cookie_value():
+    """期望的 cookie 值（密码的 SHA-256 哈希）。"""
+    if not SITE_PASSWORD:
+        return ""
+    return hashlib.sha256(SITE_PASSWORD.encode("utf-8")).hexdigest()
+
+
+def _site_auth_ok(headers):
+    """检查请求是否携带有效的站点访问 cookie。"""
+    if not SITE_PASSWORD:
+        return True
+    expected = _site_auth_cookie_value()
+    for part in headers.get("Cookie", "").split(";"):
+        part = part.strip()
+        if part.startswith("zws_auth=") and part[len("zws_auth="):] == expected:
+            return True
+    return False
+
+
+def _password_gate_html():
+    """返回密码门页面 HTML。"""
+    return '''<!DOCTYPE html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zotero 文献检索</title>
+<style>
+body{font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+     background:#f7f9fb;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:32px;max-width:360px;width:90%;
+      box-shadow:0 2px 8px rgba(0,0,0,.06)}
+h2{color:#0a6ebd;margin:0 0 8px;font-size:18px}
+.sub{color:#64748b;font-size:13px;margin:0 0 16px}
+input{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;
+      box-sizing:border-box;margin-bottom:12px}
+input:focus{border-color:#0a6ebd;outline:none}
+button{width:100%;padding:10px;border:none;border-radius:8px;background:#0a6ebd;color:#fff;
+       font-size:14px;font-weight:600;cursor:pointer}
+button:hover{background:#095a9c}
+.err{color:#dc2626;font-size:13px;margin-top:8px;display:none}
+</style></head><body>
+<div class="card">
+  <h2>🔬 Zotero 文献检索</h2>
+  <p class="sub">请输入访问密码</p>
+  <input type="password" id="pwd" placeholder="访问密码" autofocus
+         onkeydown="if(event.key==='Enter')doLogin()">
+  <button onclick="doLogin()">进入</button>
+  <div id="err" class="err">密码错误，请重试</div>
+</div>
+<script>
+async function doLogin(){
+  const pwd=document.getElementById('pwd').value;
+  try{
+    const r=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({password:pwd})});
+    if(r.ok){location.reload();}else{document.getElementById('err').style.display='block';}
+  }catch(e){document.getElementById('err').textContent='网络错误：'+e;document.getElementById('err').style.display='block';}
+}
+</script>
+</body></html>'''
 
 
 def _auth_ok(headers, payload):
@@ -641,18 +706,28 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass  # 静默
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", extra_headers=None):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            if extra_headers:
+                for k, v in extra_headers:
+                    self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError):
             pass  # 客户端已断开（导入耗时长，浏览器超时），忽略写错误
 
     def do_GET(self):
+        # 站点密码保护：未登录时返回密码门页面
+        if not _site_auth_ok(self.headers):
+            if self.path in ("/", "/index.html"):
+                self._send(200, _password_gate_html(), "text/html; charset=utf-8")
+                return
+            self._send(401, json.dumps({"error": "需要访问密码"}))
+            return
         if self.path in ("/", "/index.html"):
             try:
                 html = open(os.path.join(HERE, "web_search.html"),
@@ -702,6 +777,23 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(raw) if raw else {}
         except Exception:
             payload = {}
+
+        # /api/auth 始终可访问（登录端点）
+        if self.path == "/api/auth":
+            password = (payload.get("password") or "").strip()
+            if SITE_PASSWORD and password == SITE_PASSWORD:
+                cookie = f"zws_auth={_site_auth_cookie_value()}; Path=/; Max-Age=86400; SameSite=Lax"
+                if _is_cloud():
+                    cookie += "; Secure; HttpOnly"
+                self._send(200, '{"ok":true}', extra_headers=[("Set-Cookie", cookie)])
+            else:
+                self._send(401, json.dumps({"ok": False, "error": "密码错误"}))
+            return
+
+        # 站点密码保护：其他 POST 端点需要先登录
+        if not _site_auth_ok(self.headers):
+            self._send(401, json.dumps({"error": "需要访问密码"}))
+            return
 
         if self.path == "/api/search":
             query = (payload.get("query") or "").strip()
@@ -802,6 +894,7 @@ def main():
     print(f"  代理: {_CURRENT_PROXY or '直连（无代理 / 自动探测未命中）'}")
     print(f"  导入鉴权: 多用户模式（用户自带 Zotero 凭证）" +
           (f" + 管理员令牌已设" if ACCESS_TOKEN else ""))
+    print(f"  站点密码: {'已启用（需 SITE_PASSWORD）' if SITE_PASSWORD else '未启用（公开访问）'}")
     print("  按 Ctrl+C 停止。")
     try:
         server.serve_forever()
